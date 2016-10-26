@@ -50,7 +50,6 @@ objects are just addresess of where the `.klm` files area saved.
 
 Here is a critical step: I was unable to read the `.klm` files neither with `rgdal`,
 neither with `dggridR`'s `dg_process_kml`. Maybe it will be possible on Windows,
-I have no idea.
 
 This is what happens:
 
