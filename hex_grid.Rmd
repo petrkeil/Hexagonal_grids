@@ -1,0 +1,176 @@
+---
+title: "Building global hexagonal grids"
+author: "Petr Keil"
+date: "October 26, 2016"
+output: 
+  html_document: 
+    highlight: pygments
+    number_sections: yes
+    theme: cerulean
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# The necessary libraries and stuff
+
+```{r, message=FALSE, warning=FALSE}
+library(dggridR)
+library(rgdal)
+library(ggplot2)
+
+# Shapefile of global administrative areas:
+admin <- readOGR(dsn="ADMIN", layer="TM_WORLD_BORDERS")
+```
+
+# Create the hexagonal grids 
+
+Construction the dggs objects
+
+```{r}
+# for cell area of 629,710.6441 km^2
+  dggs4 <- dgconstruct(type = "ISEA3H", res = 4)
+# for cell area of 209,903.54803 km^2
+  dggs5 <- dgconstruct(type = "ISEA3H", res = 5) 
+# for cell area of 69,967.84934
+  dggs6 <- dgconstruct(type = "ISEA3H", res = 6) 
+```
+
+Create the global grids, unfortunately in the `.klm` format. The resulting
+objects are just addresess of where the `.klm` files area saved.
+
+```{r}
+  G4 <- dgearthgrid(dggs4, frame = TRUE, wrapcells = TRUE, savegrid = FALSE)
+  G5 <- dgearthgrid(dggs5, frame = TRUE, wrapcells = TRUE, savegrid = TRUE)
+  G6 <- dgearthgrid(dggs6, frame = TRUE, wrapcells = TRUE, savegrid = TRUE)
+```
+
+# Switching to QGIS
+
+Here is a critical step: I was unable to read the `.klm` files neither with `rgdal`,
+neither with `dggridR`'s `dg_process_kml`. Maybe it will be possible on Windows,
+I have no idea.
+
+This is what happens:
+
+```{r, error=TRUE}
+  dg_process_kml(G4, frame=TRUE, wrapcells=TRUE)
+```
+
+What I did is: **I loaded the `.klm` files to QGIS, and saved them as esri shapefiles**.
+
+# Reading the ESRI shapefiles to R
+
+```{r}
+  G4.poly <- readOGR(dsn="GRID", layer="GRIDres4")
+  G5.poly <- readOGR(dsn="GRID", layer="GRIDres5")
+  G6.poly <- readOGR(dsn="GRID", layer="GRIDres6")
+```
+
+# Simple plots
+
+```{r, fig.width=14, fig.height=8}
+par(mai=c(0.1, 0.1, 0.1, 0.1))
+
+plot(admin, col="grey", border=NA)
+plot(G4.poly, add=TRUE)
+
+plot(admin, col="grey", border=NA)
+plot(G5.poly, add=TRUE)
+
+plot(admin, col="grey", border=NA)
+plot(G6.poly, add=TRUE)
+
+```
+
+# Fancy ggplots
+
+## Function preparing the shapefile for ggplot2
+
+This funciton thakes the hexagonal grid, and converts it into a data frame
+that is usable by `ggplot2`. It also sorts out the ugly wrapping of the hexagons
+around the edges.
+
+The function is adopted from the original `dg_process_kml` in package `dggridR`. 
+It takes shapefiles instead of the `.klm` files
+
+**Arguments:** 
+
+**map** - `SpatialPolygonsDataFrame` or `SpatialPolygons` class representing the grid. 
+
+```{r}
+clean.hex.map <- function(map)
+{
+  long  <- NULL
+  group <-NULL
+  
+  map@data$timestamp    <- NULL
+  map@data$begin        <- NULL
+  map@data$end          <- NULL
+  map@data$altitudeMode <- NULL
+  map@data$extrude      <- NULL
+  map@data$visibility   <- NULL
+  map@data$drawOrder    <- NULL
+  map@data$icon         <- NULL
+  map@data$description  <- NULL
+  map@data$tessellate   <- NULL
+  map@data$id           <- rownames(map@data)
+  
+  map.points <- fortify(map, region="id")
+  map.df     <- merge(map.points, map@data, by="id")
+    
+  # Find dangerous polygons based on how many degrees of longitude they span
+  groups_to_wrap <- map.df %>% group_by(group) %>% 
+                    summarise(diff=max(long)-min(long)) %>% 
+                    filter(diff>180) %>% select(group)
+      
+  # Adjust them so they appear on the eastern side of the map
+  map.df <- map.df %>% 
+            mutate(long=ifelse(group %in% groups_to_wrap$group,
+                               ifelse(long<0,long+360,long), long))
+  
+  # Arrange polygon points so they are ordered appropriately, otherwise the results
+  # will not be nice, closed cells, but weird triangular thingies
+  clean.map <- map.df %>% arrange(group,order)
+  return(clean.map)
+}
+```
+
+## Processing the shapefiles to data.frames for ggplot2
+
+```{r}
+  gg.map4 <- clean.hex.map(G4.poly)
+  gg.map5 <- clean.hex.map(G5.poly)
+  gg.map6 <- clean.hex.map(G6.poly)
+  gg.admin <- fortify(admin)
+```
+
+## The plots
+
+```{r, fig.width=14, fig.height=8}
+  ggplot(gg.map4, aes(y=lat, x=long, group=group)) +
+    theme_bw() +
+    geom_polygon(data=gg.admin, aes(y=lat, x=long, group=group), fill="grey") +
+    geom_polygon( colour="black", fill=NA)
+```
+
+```{r, fig.width=14, fig.height=8}
+  ggplot(gg.map5, aes(y=lat, x=long, group=group)) +
+    theme_bw() +
+    geom_polygon(data=gg.admin, aes(y=lat, x=long, group=group), fill="grey") +
+    geom_polygon( colour="black", fill=NA)
+```
+
+```{r, fig.width=14, fig.height=8}
+  ggplot(gg.map6, aes(y=lat, x=long, group=group)) +
+    theme_bw() +
+    geom_polygon(data=gg.admin, aes(y=lat, x=long, group=group), fill="grey") +
+    geom_polygon( colour="black", fill=NA)
+```
+
+# The end
+
+```{r}
+  sessionInfo()
+```
